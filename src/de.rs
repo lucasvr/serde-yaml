@@ -149,19 +149,18 @@ impl<'de> Deserializer<'de> {
 
         let mut aliases = BTreeMap::<usize, Vec<usize>>::new();
         for (i, event) in document.events.iter().enumerate() {
-            match event {
-                (Event::Alias(id), _) => aliases.entry(*id).or_default().push(i),
-                _ => {}
+            if let (Event::Alias(id), _) = event {
+                aliases.entry(*id).or_default().push(i);
             }
         }
 
         let mut anchors = Vec::new();
         for (alias_id, document_index) in &document.aliases {
             let anchor_name = document.anchors.get(alias_id).unwrap();
-            let anchor_path = self.event_path(*document_index, document);
+            let anchor_path = self.event_path(*document_index);
             let mut anchors_aliases = Vec::new();
-            for alias_index in aliases.get(alias_id).unwrap_or(&Vec::new()).iter() {
-                anchors_aliases.push(self.event_path(*alias_index, document));
+            for alias_index in aliases.get(alias_id).unwrap_or(&Vec::new()) {
+                anchors_aliases.push(self.event_path(*alias_index));
             }
 
             anchors.push(DocumentAnchor {
@@ -174,29 +173,31 @@ impl<'de> Deserializer<'de> {
         Some(anchors)
     }
 
-    fn event_path(&self, event_index: usize, document: &Document<'_>) -> String {
+    fn event_path(&self, event_index: usize) -> String {
         let mut mapping_end = 0u32;
         let mut process_scalar = true;
         let mut path = Vec::new();
 
-        for i in (0..=event_index).rev() {
-            let event = &document.events[i];
-            match &event.0 {
-                Event::MappingEnd => mapping_end += 1,
-                Event::MappingStart(_) => {
-                    if mapping_end > 0 {
-                        mapping_end -= 1
-                    } else {
-                        process_scalar = true;
+        if let Progress::Document(document) = &self.progress {
+            for i in (0..=event_index).rev() {
+                let event = &document.events[i];
+                match &event.0 {
+                    Event::MappingEnd => mapping_end += 1,
+                    Event::MappingStart(_) => {
+                        if mapping_end > 0 {
+                            mapping_end -= 1;
+                        } else {
+                            process_scalar = true;
+                        }
                     }
-                }
-                Event::Scalar(scalar) => {
-                    if process_scalar {
-                        path.insert(0, String::from_utf8_lossy(&scalar.value).to_string());
-                        process_scalar = false;
+                    Event::Scalar(scalar) => {
+                        if process_scalar {
+                            path.insert(0, String::from_utf8_lossy(&scalar.value).to_string());
+                            process_scalar = false;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
         format!("/{}", path.join("/"))
